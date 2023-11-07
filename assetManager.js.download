@@ -1,0 +1,119 @@
+"use strict";
+
+
+function Asset () 
+{
+    this.successCount = 0;
+    this.errorCount = 0;
+    this.cache = {};
+    this.downloadQueue = [];
+
+
+    this.isDone = function() 
+    {
+        return (this.downloadQueue.length == this.successCount + this.errorCount);
+    };
+  
+   
+    this.queueDownload = function(path) 
+    {
+        this.downloadQueue.push(path);
+    };
+  
+    this.getAsset = function(path) 
+    {
+        return this.cache[path];
+    };
+    
+    this.downloadImage = function(path, afterDownload) 
+    {
+        var img     = new Image();
+        var scope   = this;
+        
+        
+        $(img).attr({'src': path});
+        
+        
+        //.load(function() 
+        //{
+          //  var img = this;
+        var tmrLoaded = window.setInterval(function()
+        {   
+            if (img.width) {
+                window.clearInterval(tmrLoaded);  
+                scope.successCount += 1;
+                afterDownload();
+            }
+        }, 100);
+        //});
+                    
+                    
+        $(img).on("error", function()
+        {
+            scope.errorCount += 1;
+            afterDownload();  
+        });
+
+        this.cache[path] = img; 
+    };
+    
+    this.downloadAudio = function(path, afterDownload)
+    {
+        var audio = new Audio();
+        var scope = this;
+        
+        audio.addEventListener('canplaythrough', function() 
+        {
+            scope.successCount += 1;
+            afterDownload();
+            
+        }, false); 
+        
+        audio.src = path;
+    }
+}
+
+Asset.prototype.downloadAll = function(callback) 
+{
+    if (this.downloadQueue.length === 0) {
+        callback();
+    }
+    
+    var extensions = {
+            png  :'Image',
+            jpg  :'Image',
+            jpeg :'Image',
+            gif  :'Image',
+            mp3  :'Audio'
+    }
+   
+    for (var i = 0; i < this.downloadQueue.length; i++) {
+        var path  = this.downloadQueue[i];
+
+        
+        if (path.length == 0 || typeof(path) != 'string') {
+            continue;
+        }
+        
+        var ext   = path.substr(path.lastIndexOf('.') + 1);
+        var method;
+        
+        
+        if (extensions.hasOwnProperty(ext)) {
+           
+            method = extensions[ext];   
+        } else {
+            console.log("Error with extension " + ext);
+        }
+        
+        var self = this;
+        
+        self['download' + method](path, function() 
+        {
+
+            if (self.isDone()) { // all assets completed
+                callback();
+            }
+        });
+    }
+}

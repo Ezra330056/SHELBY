@@ -1,0 +1,547 @@
+"use strict";
+
+var bx = {};
+
+var browser    = {
+    hasStorage : function() 
+    {
+        try {
+          return 'localStorage' in window && window['localStorage'] !== null;
+          
+        } catch (e) {return false;}
+    }  
+};
+
+
+bx.viewer  = function()
+{
+    var on = {
+        $ : {
+            main   : $('#book'),
+            back   : $('#back'),
+            next   : $('#next'),
+            text   : $('#text'),
+            page   : $('#pageNumber')
+        },
+        o : {
+            text   : document.querySelector('#text'),
+            viewer : document.querySelector('#bxviewer')
+        },
+        lineHeight      : 18,
+        imgMarginBottom : 18
+    },
+    page     = {},
+    images   = {},
+    headers  = {},
+    chapters = {};
+
+    on.isMobile  =   "ontouchstart" in window;
+    /*
+     * set a extra margin for the header tags to ensure each chapter begins on
+     * a new site
+     */
+    headers.setPosition = function(viewerHeight) 
+    {
+        var headers  = on.o.text.querySelectorAll('h1,img');
+        var height   = on.o.viewer.offsetHeight;
+
+        [].forEach.call(headers,function(elem) 
+        {
+            
+            if (elem.tagName == 'H1') {
+                
+                if (elem.previousElementSibling) {
+                    var node = elem.previousElementSibling;
+                    
+                    if (node.tagName == 'BR') {
+                        node.parentNode.removeChild(node);
+                    }
+                }
+                
+                elem.style['marginTop'] = "0px";
+    
+                var pages    = elem.offsetTop % height;
+                
+                if (pages != 0) {
+                    
+                    if (pages == '18') {
+                        elem.style['marginTop'] = '-18px';
+                    } else {
+                        var newMargin = height - pages; // new margin!
+                        elem.style['marginTop'] = newMargin + 'px';
+                    }
+    
+                }
+            } else {
+   
+                // Set a new Page for every Image
+                elem.style['marginTop'] = "0px";
+                elem.style['height']    = (elem.height > height) ?  height +'px' : 'auto';
+                
+                if (elem.getAttributeNode('data-full')) {
+                    elem.style['height']    =  height +'px';  
+                }  
+                 
+                var pages    = elem.offsetTop % height;
+
+                if (pages != 0) {
+                    if ( pages < (height / 2) )  {
+                        
+                        if (elem.height > (height - pages)) {
+                            elem.style['height']  = (height - pages) + 'px';
+                        }
+                        
+                    } else  {
+                        
+                        var newMargin           = height - pages; 
+                        elem.style['marginTop'] = newMargin + 'px';
+
+                    }
+                }
+ 
+                if (elem.nextSibling == null || elem.nextSibling.tagName != 'IMG') {
+    
+                    var imgFinish     = (elem.offsetTop + elem.height);
+                    var formel        = Math.round(imgFinish / height);
+                    formel            = formel * height; 
+                    formel            = imgFinish - formel;
+                    var imgCutHeight  = formel;
+                    var bestHeight    = ( page.setArea(imgCutHeight + on.imgMarginBottom) - imgCutHeight);
+                    
+                    elem.style['marginBottom'] = bestHeight + 'px';
+                }
+                
+            }
+        });
+    };
+    
+    page.percent = function() 
+    {
+        var textTop   = on.textTop();
+        var data      = textTop + ',' + on.o.viewer.offsetHeight + ',' + on.o.text.offsetHeight;
+        window.location.hash = data
+        
+        if (browser.hasStorage && !on.isMobile) {
+            var id      = on.o.viewer.getAttribute('data-bookid');
+            localStorage.setItem(id, data);
+        }
+        
+        var anon = (on.o.viewer.getAttribute('data-anon') == "true");
+          
+        if (!anon) {
+            on.setBookmark(id, data);
+
+        }
+        
+    };
+
+    on.gotoHash = function(data) 
+    {
+        var hash          = data.split(',');
+        var height        = on.o.viewer.offsetHeight;
+        var contentHeight = on.o.text  .offsetHeight;
+        
+        
+        if (hash.length == 3) {
+
+            if (hash[1] == height) {
+         
+                var top      = Number(hash[0].replace('#', ''));  
+                var newPage  = Math.round(top / on.max) * on.max;
+
+            } else {
+                
+                var top      = Number(hash[0].replace('#', ''));
+                var complete = Number(hash[2]);
+         
+                var exakt    = (top * 100 / complete);
+                var newPage  = (contentHeight * exakt / 100);
+                
+                newPage      = (hash[1] > height) ?
+                               Math.floor(newPage / on.max) * on.max : 
+                               Math.ceil(newPage  / on.max) * on.max;
+            }
+            
+            if (newPage < 0 ) newPage = 0;
+            
+            
+            var maxHeight = (contentHeight + height);
+
+            if (newPage > maxHeight) {
+                newPage = contentHeight - height;
+            } 
+            on.o.text.style['top'] = '-'+  newPage  + 'px';
+             
+            return true;
+        }
+    };
+    
+    on.gotoPercent = function() 
+    {
+        if (!on.gotoHash(location.hash)) {
+            var bookmark = on.o.viewer.getAttribute('data-bookmark');
+            
+            if (bookmark.length > 0) {
+                on.gotoHash(bookmark);
+                
+            } else if (browser.hasStorage && !on.isMobile) {
+                var id      = on.o.viewer.getAttribute('data-bookid');
+                var content = localStorage.getItem(id); 
+                if (content ) {
+                    on.gotoHash(content);
+                }
+            }
+        }
+    };
+    
+    
+    on.setBookmark = function (id, page)
+    {
+        $.ajax({
+            url:  '/book::set-bookmark.json' ,
+            type: 'POST',
+            data:  {'page' : page, 'bookID' : id}
+        });
+    };
+
+    
+    /*  download all images with the asset class */
+    images.download = function(callback) 
+    {
+        var imgAsset   = new Asset();
+        on.o.images    = on.o.text.querySelectorAll('img');
+     
+        [].forEach.call(on.o.images ,function(image) 
+        {
+            imgAsset.queueDownload(image.src); 
+        });
+
+        imgAsset.downloadAll(callback); 
+    };
+
+    on.resize = function()
+    {
+        on.o.viewer.style['height'] = '100%';
+        on.max  = page.setArea((Math.min(on.o.viewer.offsetHeight, 690) -120));
+        on.o.viewer.style['height'] =  on.max + 'px'
+
+        headers.setPosition();   
+             
+        on.gotoPercent();
+        page   .setRightPage(on.max);
+        
+        if (!on.isMobile) {
+            var  back            =  document.querySelector('#background');          
+            back.style['height'] = back.offsetHeight + 'px';
+            back.style['width']  = back.offsetWidth + 'px';
+        }
+        
+        
+        var textTop  = on.textTop();
+
+
+
+        // All correction finished, set the infos:
+        page.navigation(textTop, on.o.text.offsetHeight); // set arrows
+        page.getPages(); // set page count
+    };
+
+    var actions = 
+    {
+        content : function() 
+        {
+            $(document.body).addClass('toc');
+        },
+        contentClose : function()
+        {
+            $(document.body).removeClass('toc');  
+        },
+        home : function() 
+        {
+            location.assign('/');
+        },
+        gotoChapter : function(self) 
+        {           
+            var newChapter = self.data('chapter');
+            chapters.gotoChapter (newChapter-1);   
+            actions.contentClose();    
+        },
+        gotoCover : function()
+        {
+            page.gotoPage(0);
+            actions.contentClose();   
+        },
+        close : function () {window.close();}
+    };
+  
+    on.textTop = function() 
+    {
+        return Number(on.o.text.style['top'].replace('px','')) * - 1;
+    };
+    
+    page.setRightPage  = function(viewerHeight) 
+    {
+        var textTop     = on.textTop();
+        var overflow    = textTop % viewerHeight; 
+        
+        
+        if (overflow != 0) {
+            var newTop      = (Math.round(textTop / viewerHeight) * viewerHeight);
+            
+            if (newTop  > on.o.text.offsetHeight)  {
+                newTop = ((Math.round(on.o.text.offsetHeight / viewerHeight)) * viewerHeight)
+            }
+            
+            on.o.text.style['top'] = '-' + newTop + 'px';
+        }
+
+    };
+
+    chapters.gotoChapter = function(newChapter)
+    {
+        on.$.text.find('h1').eq(newChapter).each(function() 
+        {
+            var headTop     = Math.round(this.offsetTop / on.max) * on.max;
+            page.gotoPage(headTop);
+            return;
+        });
+    };
+    
+    page.getPages = function() 
+    {
+        var textTop    = on.textTop();
+        var textHeight = on.o.text.offsetHeight;
+        var maxSite    = Math.ceil(textHeight / on.max); 
+        var curSite    = Math.floor(textTop   / on.max) + 1;
+        page.curSite   = curSite;
+        page.maxSite   = maxSite;
+        
+        on.$.page.find('.current').text(page.curSite);
+        on.$.page.find('.max')    .text(page.maxSite);
+        
+        page.percent();
+
+        $( "#slider" ).slider( "value", page.curSite );
+    };
+    
+    
+    page.setArea = function(value) 
+    {
+        return Math.floor (value / on.lineHeight)  * on.lineHeight;
+    };
+    
+    page.navigation = function(top, maxHeight) {
+        if (top == 0 ) 
+             on.$.back    .addClass('hide');    
+        else on.$.back.removeClass ('hide'); 
+        
+        if (top + on.o.viewer.offsetHeight >=  maxHeight) 
+             on.$.next    .addClass('hide');    
+        else on.$.next.removeClass ('hide'); 
+    };
+    
+    page.load = function() 
+    {
+        
+        var self        = $(this);
+        var direction   = (self.attr('id') == 'next') ? 1 : 0;
+        var textTop     = on.textTop();
+        var viewHeight  = page.setArea(on.o.viewer.offsetHeight);
+        var newTop;
+        
+        if (direction == 0)
+                newTop          =  page.setArea(textTop) - viewHeight;
+        else    newTop          =  page.setArea(textTop) + viewHeight;
+            
+        page.gotoPage(newTop);
+
+    };
+    
+    page.gotoPage = function(newTop) 
+    {
+        if (newTop   < 0 ) newTop = 0;
+        if (newTop  > on.o.text.offsetHeight)  return false; 
+        
+        var maxHeight = on.o.text.offsetHeight;
+
+        on.$.text.fadeOut('fast', function() 
+        {
+             on.$.text.css('top',  '-' + newTop +'px');
+             page.navigation(newTop, maxHeight);
+             
+             on.$.text.fadeIn('fast', function() 
+             {
+                page.getPages();
+                 
+             });  
+        });
+    };
+
+    on.init = function() 
+    {
+        images.download(function() 
+        {
+            
+            if (on.isMobile) {
+        	var clickEnd   = 'touchend';
+                var clickStart = 'touchstart';
+            }else{
+        	var clickEnd   = 'click';
+                var clickStart = 'click';                
+            }                                                                                        
+            
+            on.$.next.on(clickEnd, page.load);
+            on.$.back.on(clickEnd, page.load);
+
+            
+            on.$.main.find('[data-action]').each(function() 
+            {                
+                $(this).on(clickEnd,function(e)
+                {
+                    e.preventDefault();
+                    var action = $(this).attr('data-action');
+                    
+                    if (actions.hasOwnProperty(action)) {
+                        actions[action]($(this));
+                    }
+                });
+            });
+        
+            $(document).on('touchstart', function(e) 
+            {
+                e.preventDefault();
+            });
+
+           window.setTimeout(function() 
+            {
+                $('#loader').fadeOut('fast', function()
+                {
+                    $(this).remove();
+                });
+                
+                on.$.main.removeClass('init');
+                              
+                on.resize();
+                
+                $( "#slider" ).slider({
+                    min:   1,
+                    max:   page.maxSite,
+                    value: page.curSite,
+                    stop: function( event, ui )
+                    {
+                        if (page.curSite != ui.value) {
+                            page.gotoPage((ui.value -1) * on.max);
+                        }
+
+                    },
+                    slide: function( event, ui )
+                    {
+                        on.$.page.find('.current').text(ui.value);
+                    }
+                });
+            },1000);
+            
+            if (on.isMobile) {
+                window.onresize = function() 
+                {
+                    on.resize();  
+                };
+
+            }
+
+                
+        });
+        
+      
+        var admin = (on.o.viewer.getAttribute('data-admin') == "true");
+        
+        if (!on.isMobile & !admin) {
+
+            document.oncontextmenu      = function() {return false}; 
+            document.body.ondragstart   = function() {return false};
+            document.body.onselectstart = function() {return false};
+            document.onmousedown        = function() {return false};
+    
+            $(document).keydown(function(e) 
+            {        
+                if (e.ctrlKey && e.keyCode == 65) {return false;}     
+                if (e.ctrlKey && e.keyCode == 85) {return false;}   // strg+u
+                
+            });            
+        }
+
+    };
+    
+    return on;    
+}();
+
+
+$(document).ready(function()
+{
+        
+    bx.viewer.init();
+
+    
+    $(document.body).on('touchstart click', '[data-toggle="modal"]', function ( e )
+    {       
+        e.preventDefault();
+        
+        var self     = $(this);
+        var target   = $(self.data('target'));
+        
+        if (typeof(self.data('prevent')) != 'undefined') 
+        {
+            target.modal(
+            { 
+                closeOnBackdrop : false,
+                closeOnEscape: false
+            });
+        } else 
+        {
+            target.modal();  
+        }
+         
+        
+        return false;
+     
+    });
+    
+    $(document.body).on('touchstart click', '[data-toggle="ajax"]', function ( e )
+    {
+        e.preventDefault();
+        
+        var self     = $(this);
+        var target   = $(self.data('target'));
+        var href     = self.attr('href');
+        var cache    = false;
+        var close    = true;
+        
+        if (typeof(self.data('cache')) != 'undefined') {
+            cache = self.data('cache');
+        }
+
+        if (typeof(self.data('ajax-href')) != 'undefined') { 
+            // override original link with specific link
+            href = self.data('ajax-href');
+        }
+        
+        if (typeof(self.data('prevent')) != 'undefined') {
+            close = false;
+        }
+        
+        target.modal(
+        {
+            'method': 'show',
+            'ajax'  :  href,  
+            'cache' :  cache,
+            'origin' : self.data('target'),
+            'closeOnBackdrop' : close,
+            'closeOnEscape': close
+        });
+         
+        return false;
+    });
+    
+});
+
+
